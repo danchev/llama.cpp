@@ -1,3 +1,4 @@
+import xml.etree.ElementTree as ET
 import pytest
 import requests
 import socket
@@ -126,6 +127,35 @@ def test_no_ui():
     server.start()
     res = requests.get(url)
     assert res.status_code == 404
+    assert server.make_request("GET", "/opensearch.xml").status_code == 404
+
+
+@pytest.mark.parametrize("api_prefix", ["", "/llama", "/llama&chat"])
+def test_opensearch(api_prefix: str, monkeypatch):
+    monkeypatch.setenv("LLAMA_ARG_API_PREFIX", api_prefix)
+    make_url = server.make_url
+    monkeypatch.setattr(server, "make_url", lambda path, host=None: make_url(api_prefix + path, host))
+    server.api_key = "test-key"
+    server.start()
+    namespace = {"o": "http://a9.com/-/spec/opensearch/1.1/"}
+
+    for host, proto in [("chat.example:8080", ""), ("chat.example:8443", "https"), ("[::1]:8080", "http")]:
+        res = server.make_request("GET", "/opensearch.xml", headers={"Host": host, "X-Forwarded-Proto": proto})
+        assert res.status_code == 200
+        assert res.headers["Content-Type"] == "application/opensearchdescription+xml"
+        assert res.headers["Cache-Control"] == "no-store"
+        document = ET.fromstring(res.body)
+        base = f"{proto or 'http'}://{host}{api_prefix}"
+        assert document.find("o:ShortName", namespace).text == "llama.cpp"
+        assert document.find("o:Url", namespace).attrib == {"type": "text/html", "method": "GET", "template": base + "/?q={searchTerms}"}
+        assert document.find("o:Image", namespace).text == base + "/favicon.ico"
+
+    for headers in [{"Host": ""}, {"Host": "good.example@evil.example"}, {"Host": 'bad"host'}, {"X-Forwarded-Proto": "https, http"}, {"X-Forwarded-Proto": "invalid"}]:
+        assert server.make_request("GET", "/opensearch.xml", headers=headers).status_code == 400
+
+    assert server.make_request("GET", "/props").status_code == 401
+    assert server.make_request("GET", "/opensearch.xml/extra").status_code == 401
+    assert server.make_request("GET", "/opensearchXxml", headers={"Authorization": "Bearer test-key"}).status_code == 404
 
 
 def test_server_model_aliases_and_tags():

@@ -161,6 +161,12 @@ describe('PWA Build Output', () => {
 			expect(indexContent).toMatch(/rel="manifest" href="(\.?\/)?manifest\.webmanifest"/);
 		});
 
+		it('has an OpenSearch discovery link', () => {
+			expect(indexContent).toMatch(
+				/<link\s+rel="search"\s+type="application\/opensearchdescription\+xml"\s+href="\.\/opensearch\.xml"\s+title="llama\.cpp"\s*\/?>/
+			);
+		});
+
 		it('has apple-touch-icon link', () => {
 			expect(indexContent).toBeTruthy();
 			expect(indexContent).toMatch(/rel="apple-touch-icon"/);

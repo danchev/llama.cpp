@@ -62,6 +62,7 @@ export default defineConfig(({ mode }) => {
 			proxy: {
 				'/cors-proxy': SERVER_ORIGIN,
 				'/models': SERVER_ORIGIN,
+				'/opensearch.xml': { changeOrigin: false, target: SERVER_ORIGIN },
 				'/props': SERVER_ORIGIN,
 				'/slots': SERVER_ORIGIN,
 				'/tools': SERVER_ORIGIN,

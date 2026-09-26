@@ -70,6 +70,34 @@ static void log_server_request(const httplib::Request & req, const httplib::Resp
     SRV_DBG("response: %s\n", res.body.c_str());
 }
 
+static std::string xml_escape(const std::string & str) {
+    std::string out;
+    for (const char c : str) {
+        switch (c) {
+            case '&':  out += "&amp;";  break;
+            case '<':  out += "&lt;";   break;
+            case '>':  out += "&gt;";   break;
+            case '"':  out += "&quot;"; break;
+            case '\'': out += "&apos;"; break;
+            default:   out += c;        break;
+        }
+    }
+    return out;
+}
+
+static std::string opensearch_xml(const std::string & base_url) {
+    const std::string base = xml_escape(base_url);
+    return
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<OpenSearchDescription xmlns=\"http://a9.com/-/spec/opensearch/1.1/\">\n"
+        "  <ShortName>llama.cpp</ShortName>\n"
+        "  <Description>Chat with llama.cpp</Description>\n"
+        "  <InputEncoding>UTF-8</InputEncoding>\n"
+        "  <Image width=\"48\" height=\"48\" type=\"image/x-icon\">" + base + "/favicon.ico</Image>\n"
+        "  <Url type=\"text/html\" method=\"GET\" template=\"" + base + "/?q={searchTerms}\"/>\n"
+        "</OpenSearchDescription>\n";
+}
+
 // returns true if the Origin header value's host is localhost / 127.0.0.1 / ::1 (any port)
 static bool origin_is_localhost(const std::string & origin) {
     try {
@@ -238,6 +266,8 @@ bool server_http_context::init_listener(const common_params & params) {
     // Middlewares
     //
 
+    const bool has_ui = params.ui && (!params.public_path.empty() || !llama_ui_get_assets().empty());
+
     // Frontend paths - all embedded UI assets
     static const std::unordered_set<std::string> frontend_paths = []() {
         std::unordered_set<std::string> paths { "/" };
@@ -328,7 +358,7 @@ bool server_http_context::init_listener(const common_params & params) {
     };
 
     // register server middlewares
-    srv->set_pre_routing_handler([&params, middleware_validate_api_key, middleware_server_state](const httplib::Request & req, httplib::Response & res) {
+    srv->set_pre_routing_handler([&params, has_ui, middleware_validate_api_key, middleware_server_state](const httplib::Request & req, httplib::Response & res) {
         if (params.cors_credentials && params.cors_origins == "*") {
             // special case: echo back the Origin header to allow any origin to access the server with credentials
             res.set_header("Access-Control-Allow-Origin", req.get_header_value("Origin"));
@@ -351,6 +381,9 @@ bool server_http_context::init_listener(const common_params & params) {
             res.set_content("", "text/html"); // blank response, no data
             return httplib::Server::HandlerResponse::Handled; // skip further processing
         }
+        if (has_ui && req.path == params.api_prefix + "/opensearch.xml") {
+            return httplib::Server::HandlerResponse::Unhandled;
+        }
         if (!middleware_server_state(req, res)) {
             return httplib::Server::HandlerResponse::Handled;
         }
@@ -367,6 +400,31 @@ bool server_http_context::init_listener(const common_params & params) {
     //
     // Web UI setup
     //
+
+    if (has_ui) {
+        // OpenSearch needs absolute URLs for the host used by the browser.
+        const bool ssl_enabled = !params.ssl_file_key.empty() && !params.ssl_file_cert.empty();
+        srv->Get(params.api_prefix + "/opensearch\\.xml",
+            [api_prefix = params.api_prefix, ssl_enabled](const httplib::Request & req, httplib::Response & res) {
+                const std::string host = req.get_header_value("Host");
+                if (req.get_header_value_count("Host") != 1 || host.empty() ||
+                    host.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._:[]%") != std::string::npos) {
+                    res.status = 400;
+                    res.set_content("Error: invalid Host header", "text/plain");
+                    return;
+                }
+                const std::string proto = req.get_header_value("X-Forwarded-Proto");
+                if (req.get_header_value_count("X-Forwarded-Proto") > 1 || (!proto.empty() && proto != "http" && proto != "https")) {
+                    res.status = 400;
+                    res.set_content("Error: invalid X-Forwarded-Proto header", "text/plain");
+                    return;
+                }
+                const bool https = proto.empty() ? ssl_enabled : proto == "https";
+                const std::string base_url = (https ? "https://" : "http://") + host + api_prefix;
+                res.set_header("Cache-Control", "no-store");
+                res.set_content(opensearch_xml(base_url), "application/opensearchdescription+xml");
+            });
+    }
 
     // Use new `params.ui` field (backed by old `params.webui` for compat)
     if (!params.ui) {
