@@ -90,6 +90,7 @@ class ServerProcess:
     server_slots: bool | None = False
     pooling: str | None = None
     api_key: str | None = None
+    api_prefix: str = ""
     models_dir: str | None = None
     models_max: int | None = None
     models_preset: str | None = None
@@ -167,6 +168,8 @@ class ServerProcess:
             server_args.append("--offline")
         if self.model_file:
             server_args.extend(["--model", self.model_file])
+        if self.api_prefix:
+            server_args.extend(["--api-prefix", self.api_prefix])
         if self.model_url:
             server_args.extend(["--model-url", self.model_url])
         if self.model_draft:
@@ -367,7 +370,7 @@ class ServerProcess:
     def make_url(self, path: str, host: str | None = None) -> str:
         if host is None:
             host = self.server_host.split(",")[0].strip()
-        return f"http://{host}:{self.server_port}{path}"
+        return f"http://{host}:{self.server_port}{self.api_prefix}{path}"
 
     def make_request(
         self,

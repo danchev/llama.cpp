@@ -239,25 +239,25 @@ bool server_http_context::init_listener(const common_params & params) {
     //
 
     // Frontend paths - all embedded UI assets
-    static const std::unordered_set<std::string> frontend_paths = []() {
-        std::unordered_set<std::string> paths { "/" };
+    const std::unordered_set<std::string> frontend_paths = [api_prefix = params.api_prefix]() {
+        std::unordered_set<std::string> paths { api_prefix + "/" };
         for (const llama_ui_asset & a : llama_ui_get_assets()) {
-            paths.insert("/" + a.name);
+            paths.insert(api_prefix + "/" + a.name);
         }
         return paths;
     }();
 
     // Public endpoints - API routes plus all embedded UI assets
-    static const std::unordered_set<std::string> get_public_endpoints = []() {
+    const std::unordered_set<std::string> get_public_endpoints = [&frontend_paths, &params]() {
         std::unordered_set<std::string> endpoints {
-            "/health",
-            "/v1/health",
+            params.api_prefix + "/health",
+            params.api_prefix + "/v1/health",
         };
         endpoints.insert(frontend_paths.begin(), frontend_paths.end());
         return endpoints;
     }();
 
-    auto middleware_validate_api_key = [api_keys = params.api_keys](const httplib::Request & req, httplib::Response & res) {
+    auto middleware_validate_api_key = [api_keys = params.api_keys, get_public_endpoints](const httplib::Request & req, httplib::Response & res) {
         // If API key is not set, skip validation
         if (api_keys.empty()) {
             return true;
@@ -304,7 +304,7 @@ bool server_http_context::init_listener(const common_params & params) {
         return false;
     };
 
-    auto middleware_server_state = [this](const httplib::Request & req, httplib::Response & res) {
+    auto middleware_server_state = [this, frontend_paths](const httplib::Request & req, httplib::Response & res) {
         if (!is_ready.load()) {
             if (frontend_paths.count(req.path)) {
                 return true; // frontend asset, allow it to load and show "loading"

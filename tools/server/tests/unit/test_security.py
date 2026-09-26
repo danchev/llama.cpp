@@ -24,9 +24,11 @@ def test_access_public_endpoint(endpoint: str):
     assert "error" not in res.body
 
 
-def test_access_static_assets_without_api_key():
+@pytest.mark.parametrize("api_prefix", ["", "/llama"])
+def test_access_static_assets_without_api_key(api_prefix: str):
     """Static web UI assets should not require API key authentication (issue #21229)"""
     global server
+    server.api_prefix = api_prefix
     server.start()
     for path in ["/", "/sw.js", "/manifest.webmanifest", "/_app/version.json"]:
         res = server.make_request("GET", path)
